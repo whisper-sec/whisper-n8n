@@ -1,0 +1,49 @@
+{
+  "name": "n8n-nodes-whisper",
+  "version": "0.1.0",
+  "description": "n8n community node to verify Whisper agent IPv6 identities and read their public RDAP record, transparency log, and inbound lookups - keyless, no credentials.",
+  "license": "MIT",
+  "homepage": "https://whisper.online/platform",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "whisper",
+    "agent",
+    "identity",
+    "rdap",
+    "ipv6",
+    "transparency"
+  ],
+  "author": "Whisper Security <packages@whisper.online>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/whisper-sec/whisper-n8n.git"
+  },
+  "bugs": {
+    "url": "https://github.com/whisper-sec/whisper-n8n/issues"
+  },
+  "engines": {
+    "node": ">=20.15"
+  },
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "nodes": [
+      "dist/nodes/Whisper/Whisper.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "n8n-workflow": "*",
+    "typescript": "^5.9.3"
+  }
+}

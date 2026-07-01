@@ -1,0 +1,30 @@
+name: publish
+
+# Publish the community node to npm on a version tag (v*).
+# Requires an npm automation token in the repo/org secret NPM_TOKEN.
+#   git tag v0.1.0 && git push --tags   ->   this workflow publishes n8n-nodes-whisper
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
