@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-whisper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "n8n community node to verify Whisper agent IPv6 identities and read their public RDAP record, transparency log, and inbound lookups - keyless, no credentials.",
   "license": "MIT",
   "homepage": "https://whisper.online/platform",
