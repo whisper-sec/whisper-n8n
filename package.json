@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-whisper",
-  "version": "0.3.0",
-  "description": "n8n community node for Whisper agent identity: register agents with routable IPv6 /128s, set DNS resolver policy, read logs, get egress config, and keyless identity verification + RDAP. Bring your own Whisper API key.",
+  "version": "0.4.0",
+  "description": "n8n community node for Whisper agent identity and the whisper.security graph: register agents with routable IPv6 /128s, set DNS resolver policy, read logs, get egress config, keyless identity verification + RDAP, plus raw Cypher and 29 named graph recipes (threat posture, typosquats, attack surface, BGP hygiene and more). Bring your own Whisper API key.",
   "license": "MIT",
   "homepage": "https://whisper.online/platform",
   "keywords": [
@@ -15,7 +15,11 @@
     "dns",
     "egress",
     "provisioning",
-    "transparency"
+    "transparency",
+    "graph",
+    "cypher",
+    "threat-intelligence",
+    "osint"
   ],
   "author": "Whisper Security <packages@whisper.online>",
   "repository": {
