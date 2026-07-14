@@ -2,7 +2,9 @@
 
 Provision, govern and inspect [Whisper](https://whisper.online/platform) agent identities
 from an n8n workflow - give an agent a real, routable IPv6 identity, set its DNS policy,
-read its activity, and verify any agent, all with your own Whisper key.
+read its activity, and verify any agent, all with your own Whisper key. Plus the full
+[whisper.security](https://www.whisper.security) graph: raw Cypher and 29 named recipes
+(threat posture, typosquats, attack surface, BGP hygiene and more) as native operations.
 
 ## Install
 
@@ -41,6 +43,63 @@ need no credential at all.
 Every control operation is the one Cypher verb `whisper.agents({op:…})`, POSTed to the
 control plane. The exact request/response contract is documented in
 [`CONTROL_API.md`](https://github.com/whisper-sec/whisper-n8n/blob/main/CONTROL_API.md).
+
+## The Graph resource - query the whisper.security graph
+
+Switch **Resource** to **Graph** and the node speaks to the
+[whisper.security](https://www.whisper.security) security graph itself (3.6B+ nodes of
+DNS/BGP/WHOIS/threat intelligence). Every Graph operation is keyed (same **Whisper API**
+credential).
+
+**Run Cypher** sends arbitrary Cypher with `$parameters` to the graph query API - see the
+[Cypher API docs](https://www.whisper.security/docs/cypher-api):
+
+- **Cypher**: `CALL whisper.identify([$v]) YIELD host, canonical_name, category`
+- **Parameters (JSON)**: `{ "v": "api.openai.com" }`
+
+Each result row comes back as one n8n item.
+
+The **named recipes** below come straight from the Whisper graph catalog. *Procedures*
+run a single graph call and emit one item per row; *flows* are multi-step investigations
+run by the Whisper engine - the node streams every step back as an item
+(`start` / `step-start` / `step` / `graph` / `complete`), each `step` carrying its bound
+Cypher, columns and rows. Every field is pre-filled with a documented example, so each
+recipe runs out of the box.
+
+| Operation | Kind | What it does | Docs |
+|---|---|---|---|
+| **Threat Posture (whisper.assess)** | procedure | Get a labelled threat posture for a host or IP - malicious, benign, or unknown. | [docs](https://www.whisper.security/docs/whisper-graph/procedures) |
+| **AS-SET Membership (whisper.asSet)** | procedure | List the member ASNs of an AS-SET macro. | [docs](https://www.whisper.security/docs/whisper-graph/procedures) |
+| **Graph Schema Catalog (db.schema)** | procedure | List every node and relationship type in the graph with counts and examples. | [docs](https://www.whisper.security/docs/whisper-graph/schema) |
+| **Threat-Feed Explainer (whisper.explain / explain)** | procedure | Score an indicator against the threat feeds and explain exactly why. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/explain) |
+| **WHOIS History Timeline (whisper.history)** | procedure | Get the full historical WHOIS timeline for a domain. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/history) |
+| **WHOIS History (projection) (whisper.history.whois)** | procedure | Get the WHOIS-only historical timeline for a domain. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/history) |
+| **Vendor / Operator Identity (whisper.identify)** | procedure | Name the vendor and operator role behind a host or IP in one call. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/identify) |
+| **Tor Exit-Relay Lookup (whisper.lookupTorRelay)** | procedure | Check whether an IP is a known Tor exit relay. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/helpers) |
+| **CDN-Origin De-cloaker (whisper.origins)** | procedure | Find the real origin IPs behind a CDN-fronted domain, ranked by confidence. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/origins) |
+| **PSL Private-Suffix Affiliation (whisper.psl.affiliation)** | procedure | Check whether a domain is a PSL private-section suffix and who submitted it. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/helpers) |
+| **Registrable Apex (whisper.psl.tldPlusOne)** | procedure | Reduce any hostname to its registrable apex (eTLD+1) via the Public Suffix List. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/helpers) |
+| **Submit Observation / Feedback (whisper.submit)** | procedure | Contribute an indicator observation or feedback back into the graph (requires an API key). | [docs](https://www.whisper.security/docs/cypher-api) |
+| **Typosquat Variant Generator (whisper.variants)** | procedure | Generate look-alike domain variants of a brand and see which are registered. | [docs](https://www.whisper.security/docs/whisper-graph/procedures/variants) |
+| **Vendor Attribution Walk (whisper.walk)** | procedure | Walk the graph to the nearest known vendors behind a host, with the channel and confidence. | [docs](https://www.whisper.security/docs/whisper-graph/procedures) |
+| **Anycast DNS-Root Sovereignty** | flow | Assess how resilient a country's core DNS is if it were cut off from the world. | [docs](https://www.whisper.security/docs/recipes/compliance) |
+| **Attack Path & Connection Finder** | flow | Find the choke points an attacker would target - and how any two things connect. | [docs](https://www.whisper.security/docs/recipes/attack-path) |
+| **Attack-Surface Mapper** | flow | Map everything about a domain that's exposed to the outside world, scored for risk. | [docs](https://www.whisper.security/docs/recipes/pentest-recon) |
+| **BGP Hijack & Routing-Hygiene Audit** | flow | Grade a network's routing security and trace conflicts to the domains they'd expose. | [docs](https://www.whisper.security/docs/recipes/bgp-routing) |
+| **Dependency Blast Radius** | flow | Pick one asset and see what would break if it failed - and what it depends on in turn. | [docs](https://www.whisper.security/docs/recipes/soc) |
+| **Takedown Evidence Package** | flow | Assemble a ready-to-submit dossier for taking down a scam or phishing domain. | [docs](https://www.whisper.security/docs/recipes/threat-intel) |
+| **AI / Agent Infrastructure Discovery** | flow | Map an organisation's externally visible AI and agent endpoints from the outside. | [docs](https://www.whisper.security/docs/recipes/pentest-recon) |
+| **Threat Investigation** | flow | Investigate one suspicious domain, IP, or network in depth and get a clear picture of the threat and everything connected to it. | [docs](https://www.whisper.security/docs/recipes/soc) |
+| **Indicator Enrichment** | flow | Turn one domain or IP into a full context card - owner, hosting, mail, location, reputation at a glance. | [docs](https://www.whisper.security/docs/recipes/dns-email) |
+| **Digital Infrastructure Mapping** | flow | Trace one indicator to its true owner and full estate, even behind privacy screens and CDNs. | [docs](https://www.whisper.security/docs/recipes/compliance) |
+| **Infrastructure Concentration & Resilience** | flow | Grade an organisation for over-reliance on single providers, regions, or facilities. | [docs](https://www.whisper.security/docs/recipes/compliance) |
+| **Nameserver & DNS Delegation Audit** | flow | Check a domain's name servers for the misconfigurations that enable DNS hijacking. | [docs](https://www.whisper.security/docs/recipes/dns-email) |
+| **Network & Routing Report** | flow | Profile a network or address block into a full routing and reachability health card. | [docs](https://www.whisper.security/docs/recipes/bgp-routing) |
+| **Subdomain Takeover Detection** | flow | Find subdomains that point at abandoned services an attacker could claim. | [docs](https://www.whisper.security/docs/recipes/pentest-recon) |
+| **Typosquat & Brand-Impersonation Scanner** | flow | Find registered look-alikes of your brand and check which ones are dangerous. | [docs](https://www.whisper.security/docs/recipes/brand-protection) |
+
+To regenerate the recipe surface after a catalog update:
+`node scripts/generate-graph-catalog.mjs <path-to-catalog.json>`.
 
 ## Egress - run your n8n agents *on* the Whisper network
 
