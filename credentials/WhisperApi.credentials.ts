@@ -40,7 +40,7 @@ export class WhisperApi implements ICredentialType {
 			displayName: 'Control Plane URL',
 			name: 'controlUrl',
 			type: 'string',
-			default: 'https://graph.whisper.security/api/query',
+			default: 'https://graph.whisper.online/api/query',
 			description:
 				'The Whisper control-plane endpoint (the one Cypher verb whisper.agents runs behind). Leave as the default unless you are pointing at a pre-production endpoint.',
 		},

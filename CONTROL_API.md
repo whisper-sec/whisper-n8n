@@ -16,7 +16,7 @@ safe to ship in a public repo.
 
 | | |
 |---|---|
-| **Control endpoint** | `POST https://graph.whisper.security/api/query` |
+| **Control endpoint** | `POST https://graph.whisper.online/api/query` |
 | **Auth (owner key)** | header `X-API-Key: <whisper_live_…>` |
 | **Auth (monitor token)** | header `Authorization: Bearer et_…` - only for the SSE monitor stream |
 | **Content-Type** | `application/json` |

@@ -20,7 +20,7 @@ import { GRAPH_RECIPES, type GraphRecipe } from './GraphCatalog';
  * Whisper - provision, govern and inspect Whisper agent identities from n8n.
  *
  * This node speaks the real Whisper control plane: the single Cypher verb
- * `whisper.agents({op:…})`, POSTed to https://graph.whisper.security/api/query with the
+ * `whisper.agents({op:…})`, POSTed to https://graph.whisper.online/api/query with the
  * account holder's key in the `X-API-Key` header. The exact request/response contract is
  * documented in docs/packaging/CONTROL_API.md and mirrors the `whisper` CLI byte for byte.
  *
@@ -42,7 +42,7 @@ import { GRAPH_RECIPES, type GraphRecipe } from './GraphCatalog';
  * we NEVER surface the egress bearer / WireGuard key (bearer hygiene).
  */
 
-const DEFAULT_CONTROL_URL = 'https://graph.whisper.security/api/query';
+const DEFAULT_CONTROL_URL = 'https://graph.whisper.online/api/query';
 const RDAP_BASE = 'https://rdap.whisper.online';
 // Multi-step catalog flows run here (by slug, SSE stream); the console route caps a
 // run at 300s, so the client-side timeout sits just above that.
