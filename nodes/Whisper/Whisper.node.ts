@@ -22,7 +22,7 @@ import { GRAPH_RECIPES, type GraphRecipe } from './GraphCatalog';
  * This node speaks the real Whisper control plane: the single Cypher verb
  * `whisper.agents({op:…})`, POSTed to https://graph.whisper.online/api/query with the
  * account holder's key in the `X-API-Key` header. The exact request/response contract is
- * documented in docs/packaging/CONTROL_API.md and mirrors the `whisper` CLI byte for byte.
+ * documented in CONTROL_API.md and mirrors the `whisper` CLI byte for byte.
  *
  * Keyed control operations (need a Whisper API credential): Register Agent, Create
  * Identity, List Agents, Get Agent, Set Policy, Get Logs, Revoke Agent, Get Egress Config.

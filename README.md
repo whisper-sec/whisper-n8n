@@ -47,7 +47,7 @@ control plane. The exact request/response contract is documented in
 ## The Graph resource - query the whisper.security graph
 
 Switch **Resource** to **Graph** and the node speaks to the
-[whisper.security](https://www.whisper.security) security graph itself (3.6B+ nodes of
+[whisper.security](https://www.whisper.security) security graph itself (7.4B+ nodes and 39B+ relationships of
 DNS/BGP/WHOIS/threat intelligence). Every Graph operation is keyed (same **Whisper API**
 credential).
 
