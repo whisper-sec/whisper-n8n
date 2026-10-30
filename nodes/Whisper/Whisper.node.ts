@@ -15,6 +15,14 @@ import {
 } from 'n8n-workflow';
 
 import { GRAPH_RECIPES, type GraphRecipe } from './GraphCatalog';
+import {
+	controlProblem,
+	decodeEnvelope,
+	recordsFromResult,
+	nothingRevokedMessage,
+	revokeMatchedNothing,
+	type Problem,
+} from './envelope';
 
 /**
  * Whisper - provision, govern and inspect Whisper agent identities from n8n.
@@ -140,99 +148,6 @@ function cypherMap(m: IDataObject): string {
 function buildAgentsQuery(op: string, args: IDataObject): string {
 	const inner = Object.keys(args).length ? cypherMap(args) : '{}';
 	return 'CALL whisper.agents({op:' + quoteCypher(op) + ', args:' + inner + '})';
-}
-
-// --- Envelope decoding (ports the CLI's client/envelope.go - liberal in what we accept) --
-
-interface Problem {
-	detail?: string;
-	title?: string;
-	type?: string;
-	status?: number;
-}
-
-function problemMessage(err: Problem | undefined, status?: number): string {
-	if (err) {
-		if (err.detail) return err.detail;
-		if (err.title) return err.title;
-		if (err.type) return err.type;
-	}
-	return `control plane returned status ${status ?? '(unknown)'}`;
-}
-
-function zipRow(columns: string[], row: unknown[]): IDataObject {
-	const out: IDataObject = {};
-	for (let i = 0; i < columns.length; i++) out[columns[i]] = row[i] as IDataObject[string];
-	return out;
-}
-
-// recordsFromResult turns a {columns, rows} result (or an already-shaped array) into a
-// list of column-keyed objects - the ergonomic form we emit as n8n items.
-function recordsFromResult(result: unknown): IDataObject[] {
-	if (result === null || result === undefined) return [];
-	if (Array.isArray(result)) return result as IDataObject[];
-	const r = result as { columns?: string[]; rows?: unknown[] };
-	if (Array.isArray(r.columns) && Array.isArray(r.rows)) {
-		return r.rows.map((row) =>
-			Array.isArray(row) ? zipRow(r.columns as string[], row) : (row as IDataObject),
-		);
-	}
-	return [result as IDataObject];
-}
-
-/**
- * decodeEnvelope normalises any control-plane reply into a list of records, or throws a
- * clear error. It accepts (Postel):
- *  1. the live procedure-row wrapper: {columns, rows:[{op,ok,status,result,error,retry_after}]},
- *  2. the dev-guide shape: {ok, status, result, error},
- *  3. a bare {columns, rows:[[…]]} table, and
- *  4. a bare problem/object.
- */
-function decodeEnvelope(body: unknown, httpStatus: number): IDataObject[] {
-	const obj = body as IDataObject;
-
-	// Shape 2: an explicit top-level ok flag.
-	if (obj && typeof obj === 'object' && 'ok' in obj) {
-		if (obj.ok === false) {
-			throw { __whisperProblem: obj.error as Problem, status: (obj.status as number) ?? httpStatus };
-		}
-		return recordsFromResult(obj.result);
-	}
-
-	// Shapes 1 & 3: a {columns, rows} table.
-	if (obj && Array.isArray((obj as { rows?: unknown[] }).rows)) {
-		const rows = (obj as { rows: unknown[] }).rows;
-		if (rows.length === 0) return [];
-		const first = rows[0];
-		// Shape 1: rows are per-op envelope objects {op,ok,status,result,error,…}.
-		if (
-			first &&
-			typeof first === 'object' &&
-			!Array.isArray(first) &&
-			'ok' in (first as IDataObject)
-		) {
-			const env = first as IDataObject;
-			if (env.ok === false) {
-				throw {
-					__whisperProblem: env.error as Problem,
-					status: (env.status as number) ?? httpStatus,
-				};
-			}
-			if (env.result !== undefined && env.result !== null) return recordsFromResult(env.result);
-			return [env];
-		}
-		// Shape 3: positional rows against the outer columns.
-		const columns = (obj as { columns?: string[] }).columns;
-		if (Array.isArray(columns)) {
-			return rows.map((row) =>
-				Array.isArray(row) ? zipRow(columns, row) : (row as IDataObject),
-			);
-		}
-		return rows as IDataObject[];
-	}
-
-	// Shape 4: a bare object → a single record.
-	return obj ? [obj] : [];
 }
 
 // --- egress (op:connect) secret hygiene ----------------------------------------------
@@ -766,6 +681,20 @@ async function runKeyed(
 			json: true,
 		});
 	} catch (error) {
+		// A plane that answers the refusal as a real HTTP status (the flat {ok:false,...}
+		// envelope) still carries its code in the body; read it before giving up on it.
+		const body = errorBody(error);
+		if (body !== undefined) {
+			try {
+				decodeEnvelope(body, 0);
+			} catch (problem) {
+				const p = problem as { __whisperProblem?: Problem; status?: number };
+				if (p && p.__whisperProblem !== undefined) {
+					const cp = controlProblem(p.__whisperProblem, p.status);
+					if (cp.notFound) throw notFoundError(this, operation, cp.message, selector, i);
+				}
+			}
+		}
 		throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
 	}
 
@@ -775,11 +704,24 @@ async function runKeyed(
 	} catch (problem) {
 		const p = problem as { __whisperProblem?: Problem; status?: number };
 		if (p && p.__whisperProblem !== undefined) {
-			throw new NodeOperationError(this.getNode(), problemMessage(p.__whisperProblem, p.status), {
+			const cp = controlProblem(p.__whisperProblem, p.status);
+			if (cp.notFound) throw notFoundError(this, operation, cp.message, selector, i);
+			throw new NodeOperationError(this.getNode(), cp.message, {
 				itemIndex: i,
+				description: cp.code ? `code ${cp.code}, status ${cp.status ?? 'unknown'}` : undefined,
 			});
 		}
 		throw problem;
+	}
+
+	// An older control plane answered a revoke that matched nothing as a successful row with
+	// status not_found. That is the same answer as the NOT_FOUND refusal, so say so.
+	if (operation === 'revoke') {
+		const row = revokeMatchedNothing(records);
+		if (row) {
+			const msg = typeof row.message === 'string' && row.message.trim() ? row.message.trim() : undefined;
+			throw notFoundError(this, operation, msg, selector, i);
+		}
 	}
 
 	if (operation === 'connect') {
@@ -787,6 +729,46 @@ async function runKeyed(
 		return records.map((r) => sanitizeConnect(r, includeSecrets, selector));
 	}
 	return records;
+}
+
+// errorBody digs the response body out of an HTTP error, whichever client shape wrapped it.
+function errorBody(error: unknown): unknown {
+	const e = error as {
+		response?: { body?: unknown; data?: unknown };
+		cause?: { response?: { body?: unknown; data?: unknown } };
+	};
+	const raw =
+		e?.response?.body ?? e?.response?.data ?? e?.cause?.response?.body ?? e?.cause?.response?.data;
+	if (typeof raw === 'string') {
+		try {
+			return JSON.parse(raw);
+		} catch {
+			return undefined;
+		}
+	}
+	return raw && typeof raw === 'object' ? raw : undefined;
+}
+
+// notFoundError is the one error every "nothing matched" answer becomes. For a revoke it
+// says plainly that nothing was revoked, and that retrying cannot change the answer.
+function notFoundError(
+	ctx: IExecuteFunctions,
+	operation: string,
+	serverMessage: string | undefined,
+	selector: string,
+	itemIndex: number,
+): NodeOperationError {
+	if (operation === 'revoke') {
+		return new NodeOperationError(ctx.getNode(), nothingRevokedMessage(serverMessage, selector), {
+			itemIndex,
+			description:
+				'code NOT_FOUND, status 404, not retryable. The agent was revoked already or is not in this account.',
+		});
+	}
+	return new NodeOperationError(ctx.getNode(), serverMessage ?? `nothing of yours matches '${selector}'`, {
+		itemIndex,
+		description: 'code NOT_FOUND, status 404, not retryable.',
+	});
 }
 
 // runKeyless handles the public, no-credential surfaces (rdap.whisper.online).
