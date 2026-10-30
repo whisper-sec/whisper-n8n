@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-whisper",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "n8n community node for Whisper agent identity and the whisper.security graph: register agents with routable IPv6 /128s, set DNS resolver policy, read logs, get egress config, keyless identity verification + RDAP, plus raw Cypher and 29 named graph recipes (threat posture, typosquats, attack surface, BGP hygiene and more). Bring your own Whisper API key.",
   "license": "MIT",
   "homepage": "https://whisper.online/platform",
@@ -35,7 +35,8 @@
   "scripts": {
     "build": "tsc && node scripts/copy-assets.mjs",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test test/*.test.js"
   },
   "files": [
     "dist"
@@ -55,7 +56,8 @@
   "overrides": {
     "form-data": "4.0.6",
     "lodash": "4.18.1",
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "n8n-workflow": "*",

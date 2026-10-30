@@ -121,8 +121,14 @@ read/write scope. All actions are confined to the caller's own tenant.
   packets_down` (empty rows when the window has no events).
 
 ### `revoke` - fully revoke an agent (irreversible)
-- **args**: `agent` = `<id>` or `<128>`.
-- **result**: a status field (`status`/`state`).
+- **args**: `agent` = the agent id, its `/128` or its label.
+- **result**: a status field (`status`/`state`), `revoked` on success.
+- **Nothing to revoke**: when no agent of yours matches (revoked already, or not in your
+  account) the front door answers HTTP 200 with `ok:false`, `status:404` and
+  `error:{code:"NOT_FOUND", message, retryable:false}` inside the row. Older planes answered
+  an `ok:true` row with `status:"not_found"`. The node reads both as "nothing was revoked"
+  and fails the item with the server's message. It keys on the `NOT_FOUND` code, never on a
+  bare 404, and it is not retryable, so Retry On Fail cannot change the answer.
 
 ### `connect` - egress config bound to the agent's `/128`
 - **args**: `agent` (id or `/128`, optional - omit for the reuse-most-recent default),
