@@ -35,7 +35,7 @@ need no credential at all.
 | **Get Agent** | ✔ | One agent's detail + live counters, by id or `/128`. |
 | **Set Policy** | ✔ | Set your per-tenant DNS resolver policy (default action + allow/deny lists). With no changes, reads the current policy. |
 | **Get Logs** | ✔ | Recent DNS / connection / allocation activity. |
-| **Revoke Agent** | ✔ | Fully revoke an agent - withdraw its `/128`, PTR, tokens and key. Irreversible. |
+| **Revoke Agent** | ✔ | Fully revoke an agent - withdraw its `/128`, PTR, tokens and key. Irreversible. If nothing matches (revoked already, or not yours) the item fails with "nothing was revoked"; that is not retryable. |
 | **Get Egress Config** | ✔ | An agent's egress connect details bound to its `/128` (see **Egress** below). |
 | **Verify Identity** | - | Trust verdict for an address: `is_whisper_agent`, `fqdn`, `operator`, `tenant`, `dane_ok`, `jws_ok`, evidence. |
 | **RDAP Lookup** | - | RFC 9083 RDAP record (or its transparency log / inbound lookups). |
