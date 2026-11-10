@@ -1,8 +1,16 @@
 name: publish
 
-# Publish the community node to npm on a version tag (v*).
-# Requires an npm automation token in the repo/org secret NPM_TOKEN.
-#   git tag v0.1.0 && git push --tags   ->   this workflow publishes n8n-nodes-whisper
+# Publish the community node to npm on a version tag (v*), with a signed
+# provenance attestation that links the tarball to this workflow run.
+#
+#   npm version patch && git push --follow-tags   ->   publishes n8n-nodes-whisper
+#
+# Authentication is npm trusted publishing (OIDC): npm exchanges this job's
+# GitHub identity token for a short-lived publish credential, so no long-lived
+# token has to be stored or rotated. It needs the package's trusted publisher
+# set on npmjs.com (GitHub Actions, whisper-sec/whisper-n8n, publish.yml) and
+# npm 11.5.1 or newer, which Node 24 ships. Until the trusted publisher is set,
+# npm falls back to the NPM_TOKEN secret if one is present.
 on:
   push:
     tags:
@@ -10,21 +18,43 @@ on:
 
 permissions:
   contents: read
-  id-token: write # npm provenance
+  id-token: write # trusted publishing and the provenance attestation
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Tag matches package.json
+        run: |
+          want="v$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version ($want)"
+            exit 1
+          fi
 
       - run: npm ci
       - run: npm test
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Provenance attestation is on the registry
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          for i in 1 2 3 4 5 6; do
+            url="$(npm view "n8n-nodes-whisper@$v" dist.attestations.url 2>/dev/null || true)"
+            if [ -n "$url" ]; then
+              echo "attestations: $url"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::n8n-nodes-whisper@$v was published without a provenance attestation"
+          exit 1
