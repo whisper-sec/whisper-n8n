@@ -10,19 +10,24 @@ name: publish
 # this job's GitHub identity token for a short-lived credential that can publish
 # this one package, so there is no long-lived token to store, rotate or leak.
 # It needs the trusted publisher set on npmjs.com (n8n-nodes-whisper, Settings,
-# Trusted Publisher, GitHub Actions: whisper-sec / whisper-n8n / publish.yml, no
-# environment) and npm 11.5.1 or newer, which Node 24 ships.
+# Trusted Publisher, GitHub Actions: whisper-sec / whisper-n8n / publish.yml,
+# environment npm-publish) and npm 11.5.1 or newer, which Node 24 ships.
+#
+# A release takes two deliberate steps: a v* tag, which only repository admins
+# may create, and an approval of the publishing job, which runs in the
+# npm-publish environment (v* tags only, required reviewer). Because the trusted
+# publisher names that environment, no other job can obtain a publish credential.
 #
 # Every pull request runs the release's own install, test and pack (job
-# "check"), so the path a tag takes has run long before a tag needs it. A manual
-# run (Actions, publish, Run workflow) asks npm whether it accepts this workflow
-# as the package's trusted publisher, and publishes nothing.
+# "check"), so the path a tag takes has run long before a tag needs it. In the
+# tag run, the publishing job first asks npm whether it accepts this workflow as
+# the package's trusted publisher, and stops with the setting to fix if not,
+# before anything is published.
 on:
   push:
     tags:
       - 'v*'
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -65,8 +70,9 @@ jobs:
 
   publish:
     needs: check
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: npm-publish # v* tags only, and a required reviewer approves each release
     permissions:
       contents: read
       id-token: write # trusted publishing and the provenance attestation
@@ -122,20 +128,17 @@ jobs:
           fi
           msg="$(jq -r '.message // .error // empty' "$body" 2> /dev/null || true)"
           rm -f "$body"
-          echo "::error::npm did not accept this workflow as the trusted publisher of $pkg (HTTP $code${msg:+: $msg}). On npmjs.com open $pkg, Settings, Trusted Publisher, choose GitHub Actions and enter organization whisper-sec, repository whisper-n8n, workflow publish.yml, no environment."
+          echo "::error::npm did not accept this workflow as the trusted publisher of $pkg (HTTP $code${msg:+: $msg}). On npmjs.com open $pkg, Settings, Trusted Publisher, choose GitHub Actions and enter organization whisper-sec, repository whisper-n8n, workflow publish.yml, environment npm-publish."
           exit 1
 
       # No install scripts here: nothing the package ships is native, and a
       # dependency's install script would run with this job's id-token.
       - run: npm ci --ignore-scripts
-        if: startsWith(github.ref, 'refs/tags/v')
 
       - name: Publish with provenance
-        if: startsWith(github.ref, 'refs/tags/v')
         run: npm publish --provenance --access public
 
       - name: The registry serves a provenance attestation that verifies
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
           pkg="$(node -p 'require("./package.json").name')"
