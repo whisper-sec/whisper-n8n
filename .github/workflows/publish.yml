@@ -1,60 +1,162 @@
 name: publish
 
 # Publish the community node to npm on a version tag (v*), with a signed
-# provenance attestation that links the tarball to this workflow run.
+# provenance attestation that links the tarball to the commit and the workflow
+# run that built it.
 #
 #   npm version patch && git push --follow-tags   ->   publishes n8n-nodes-whisper
 #
-# Authentication is npm trusted publishing (OIDC): npm exchanges this job's
-# GitHub identity token for a short-lived publish credential, so no long-lived
-# token has to be stored or rotated. It needs the package's trusted publisher
-# set on npmjs.com (GitHub Actions, whisper-sec/whisper-n8n, publish.yml) and
-# npm 11.5.1 or newer, which Node 24 ships. Until the trusted publisher is set,
-# npm falls back to the NPM_TOKEN secret if one is present.
+# Authentication is npm trusted publishing (OIDC) and nothing else: npm swaps
+# this job's GitHub identity token for a short-lived credential that can publish
+# this one package, so there is no long-lived token to store, rotate or leak.
+# It needs the trusted publisher set on npmjs.com (n8n-nodes-whisper, Settings,
+# Trusted Publisher, GitHub Actions: whisper-sec / whisper-n8n / publish.yml,
+# environment npm-publish) and npm 11.5.1 or newer, which Node 24 ships.
+#
+# A release takes two deliberate steps: a v* tag, which only repository admins
+# may create, and an approval of the publishing job, which runs in the
+# npm-publish environment (v* tags only, required reviewer). Because the trusted
+# publisher names that environment, no other job can obtain a publish credential.
+#
+# Every pull request runs the release's own install, test and pack (job
+# "check"), so the path a tag takes has run long before a tag needs it. In the
+# tag run, the publishing job first asks npm whether it accepts this workflow as
+# the package's trusted publisher, and stops with the setting to fix if not,
+# before anything is published.
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
 
 permissions:
   contents: read
-  id-token: write # trusted publishing and the provenance attestation
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
 
-      - name: Tag matches package.json
+      - name: The tag names the package version and sits on main
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           want="v$(node -p 'require("./package.json").version')"
           if [ "$GITHUB_REF_NAME" != "$want" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match package.json version ($want)"
             exit 1
           fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at a commit that is not on main; merge first, then tag"
+            exit 1
+          fi
 
       - run: npm ci
       - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Provenance attestation is on the registry
+      - name: The tarball carries every n8n entry point
+        run: npm pack --dry-run --json | node scripts/check-pack.mjs
+
+  publish:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: npm-publish # v* tags only, and a required reviewer approves each release
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and the provenance attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # no cache in the job that can publish
+
+      - name: npm is new enough for trusted publishing
         run: |
+          v="$(npm --version)"
+          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number);
+                        process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$v"; then
+            echo "::error::npm $v cannot use trusted publishing; it needs 11.5.1 or newer"
+            exit 1
+          fi
+          echo "npm $v"
+
+      # The same exchange npm makes inside `npm publish`, made first and on its
+      # own, so a missing or wrong trusted-publisher setting fails here with a
+      # message that says what to set, instead of as an E404 on the upload.
+      # The credential it returns is never printed and is thrown away.
+      - name: npm accepts this workflow as the trusted publisher
+        run: |
+          set -euo pipefail
+          pkg="$(node -p 'require("./package.json").name.replace("/", "%2f")')"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::this job has no id-token permission, so trusted publishing cannot work"
+            exit 1
+          fi
+          if ! idt="$(curl -fsS --retry 3 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" | jq -r '.value // empty')" \
+              || [ -z "$idt" ]; then
+            echo "::error::GitHub issued no identity token for the npm audience"
+            exit 1
+          fi
+          echo "::add-mask::$idt"
+          body="$RUNNER_TEMP/npm-oidc-exchange.json"
+          trap 'rm -f "$body"' EXIT
+          code="$(curl -sS --retry 3 -o "$body" -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $idt" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$pkg")"
+          if [ "${code:0:1}" = 2 ] && jq -e '.token | type == "string" and length > 0' "$body" > /dev/null; then
+            rm -f "$body"
+            echo "npm accepts $GITHUB_REPOSITORY/.github/workflows/publish.yml as the trusted publisher of $pkg"
+            exit 0
+          fi
+          msg="$(jq -r '.message // .error // empty' "$body" 2> /dev/null || true)"
+          rm -f "$body"
+          echo "::error::npm did not accept this workflow as the trusted publisher of $pkg (HTTP $code${msg:+: $msg}). On npmjs.com open $pkg, Settings, Trusted Publisher, choose GitHub Actions and enter organization whisper-sec, repository whisper-n8n, workflow publish.yml, environment npm-publish."
+          exit 1
+
+      # No install scripts here: nothing the package ships is native, and a
+      # dependency's install script would run with this job's id-token.
+      - run: npm ci --ignore-scripts
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+
+      - name: The registry serves a provenance attestation that verifies
+        run: |
+          set -euo pipefail
+          pkg="$(node -p 'require("./package.json").name')"
           v="$(node -p 'require("./package.json").version')"
-          for i in 1 2 3 4 5 6; do
-            url="$(npm view "n8n-nodes-whisper@$v" dist.attestations.url 2>/dev/null || true)"
-            if [ -n "$url" ]; then
-              echo "attestations: $url"
-              exit 0
-            fi
+          pt=""
+          for _ in $(seq 1 12); do
+            pt="$(npm view "$pkg@$v" dist.attestations.provenance.predicateType 2> /dev/null || true)"
+            [ -n "$pt" ] && break
             sleep 10
           done
-          echo "::error::n8n-nodes-whisper@$v was published without a provenance attestation"
-          exit 1
+          if [ "$pt" != "https://slsa.dev/provenance/v1" ]; then
+            echo "::error::$pkg@$v is on the registry without a SLSA provenance attestation (got '${pt:-none}')"
+            exit 1
+          fi
+          echo "dist.attestations: $(npm view "$pkg@$v" dist.attestations --json | jq -c .)"
+          cd "$(mktemp -d)"
+          npm init -y > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps "$pkg@$v" > /dev/null
+          out="$(npm audit signatures 2>&1)" || { echo "$out"; exit 1; }
+          echo "$out"
+          grep -q 'verified attestation' <<< "$out"
